@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplicativo Red de Kohonen</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .header {
+            background-color: #007bff;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            background-color: white;
+        }
+        h3 {
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Aplicativo de Red Neuronal de Kohonen</h1>
+    </div>
+
+    <div class="container">
+        <div class="section">
+            <h3>Cargar Dataset de Imágenes de Letras</h3>
+            <input type="file" id="datasetInput" accept=".png, .jpg, .jpeg" multiple class="form-control-file">
+            <div id="datasetInfo" style="display:none; margin-top: 10px;">
+                <p>Número de entradas: <span id="numEntradas"></span></p>
+                <p>Número de patrones: <span id="numPatrones"></span></p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>Parámetros de la Red</h3>
+            <div class="form-group">
+                <label for="neuronas">Número de neuronas:</label>
+                <input type="number" id="neuronas" class="form-control" min="2" required>
+            </div>
+            <div class="form-group">
+                <label for="competencia">Tipo de competencia:</label>
+                <select id="competencia" class="form-control">
+                    <option value="dura">Competencia Dura</option>
+                    <option value="blanda">Competencia Blanda</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="iteraciones">Número de iteraciones:</label>
+                <input type="number" id="iteraciones" class="form-control" min="1" required>
+            </div>
+            <div class="form-group">
+                <label for="learningRate">Tasa de aprendizaje:</label>
+                <input type="number" id="learningRate" class="form-control" step="0.01" min="0" max="1" required>
+            </div>
+            <button id="entrenarBtn" class="btn btn-primary">Entrenar Red</button>
+        </div>
+
+        <div class="section" id="resultados" style="display: none;">
+            <h3>Resultados del Entrenamiento</h3>
+            <canvas id="graficoPesos"></canvas>
+            <canvas id="graficoDM"></canvas>
+            <h4>Resultados Detallados</h4>
+            <div id="resultadosDetallados"></div>
+        </div>
+    </div>
+
+    <script>
+        let chartPesos;
+        let chartDM;
+        let dataset = [];
+        let kohonenWeights = [];
+        let distanciaMedia = [];
+
+        document.getElementById('entrenarBtn').addEventListener('click', entrenarRed);
+
+        document.getElementById('datasetInput').addEventListener('change', async function(event) {
+            const files = event.target.files;
+            if (files.length > 0) {
+                dataset = await loadImages(files);
+                document.getElementById('datasetInfo').style.display = 'block';
+                document.getElementById('numEntradas').textContent = files.length;
+                document.getElementById('numPatrones').textContent = files.length;
+            }
+        });
+
+        async function loadImages(files) {
+            const images = [];
+            for (const file of files) {
+                const img = await loadImage(file);
+                images.push(convertImageToVector(img));
+            }
+            return images;
+        }
+
+        function loadImage(file) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.src = URL.createObjectURL(file);
+            });
+        }
+
+        function convertImageToVector(image) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = image.width;
+            canvas.height = image.height;
+            ctx.drawImage(image, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = Array.from(imageData.data).slice(0, imageData.width * imageData.height * 4);
+            return data.map(value => value / 255); // Normaliza los valores entre 0 y 1
+        }
+
+        function entrenarRed() {
+            const numNeuronas = parseInt(document.getElementById('neuronas').value);
+            const tipoCompetencia = document.getElementById('competencia').value;
+            const iteraciones = parseInt(document.getElementById('iteraciones').value);
+            const learningRate = parseFloat(document.getElementById('learningRate').value);
+
+            if (!dataset.length) {
+                alert("Por favor, carga un dataset antes de entrenar la red.");
+                return;
+            }
+
+            kohonenWeights = inicializarPesosAleatorios(numNeuronas, dataset[0].length);
+            distanciaMedia = []; // Reiniciar el array de distancia media
+            let resultadosDetallados = ''; // Variable para almacenar los resultados detallados
+
+            for (let iter = 0; iter < iteraciones; iter++) {
+                const patronAleatorio = dataset[Math.floor(Math.random() * dataset.length)];
+                actualizarPesos(kohonenWeights, patronAleatorio, tipoCompetencia, learningRate);
+                const dm = calcularDistanciaMedia(dataset);
+                distanciaMedia.push(dm);
+
+                // Guardar resultados detallados de cada patrón
+                dataset.forEach((patron, index) => {
+                    const winnerIndex = calcularGanadora(patron);
+                    const distancia = calcularDistanciaEuclidiana(patron, kohonenWeights[winnerIndex]);
+                    resultadosDetallados += `Patrón ${index + 1}/${dataset.length}, Neurona Vencedora: ${winnerIndex + 1}/${numNeuronas}, Distancia: ${distancia.toFixed(4)}<br>`;
+                });
+            }
+
+            graficarPesos(kohonenWeights);
+            graficarDM(distanciaMedia);
+            document.getElementById('resultados').style.display = 'block';
+            document.getElementById('resultadosDetallados').innerHTML = resultadosDetallados; // Mostrar resultados detallados
+            alert('Entrenamiento completado');
+        }
+
+        function inicializarPesosAleatorios(numNeuronas, inputSize) {
+            let pesos = [];
+            for (let i = 0; i < numNeuronas; i++) {
+                let neurona = [];
+                for (let j = 0; j < inputSize; j++) {
+                    neurona.push(Math.random() * 2 - 1);
+                }
+                pesos.push(neurona);
+            }
+            return pesos;
+        }
+
+        function actualizarPesos(pesos, patron, tipoCompetencia, learningRate) {
+            const winnerIndex = calcularGanadora(patron);
+
+            for (let i = 0; i < pesos.length; i++) {
+                if (i === winnerIndex) {
+                    for (let j = 0; j < pesos[i].length; j++) {
+                        pesos[i][j] += learningRate * (patron[j] - pesos[i][j]);
+                    }
+                } else if (tipoCompetencia === 'blanda') {
+                    const distancia = calcularDistanciaEuclidiana(patron, pesos[i]);
+                    const vecindad = Math.exp(-distancia); // Función de vecindad
+                    for (let j = 0; j < pesos[i].length; j++) {
+                        pesos[i][j] += learningRate * vecindad * (patron[j] - pesos[i][j]);
+                    }
+                }
+            }
+        }
+
+        function calcularDistanciaMedia(dataset) {
+            let totalDistance = 0;
+            for (const patron of dataset) {
+                const winnerIndex = calcularGanadora(patron);
+                totalDistance += calcularDistanciaEuclidiana(patron, kohonenWeights[winnerIndex]);
+            }
+            return totalDistance / dataset.length; // Distancia media
+        }
+
+        function graficarPesos(pesos) {
+            const ctx = document.getElementById('graficoPesos').getContext('2d');
+
+            if (chartPesos) {
+                chartPesos.destroy();
+            }
+
+            chartPesos = new Chart(ctx, {
+                type: 'line',
+                data:
+                {
+                    labels: Array.from({ length: pesos.length }, (_, i) => `Neurona ${i + 1}`),
+                    datasets: pesos.map((peso, index) => ({
+                        label: `Neurona ${index + 1}`,
+                        data: peso,
+                        borderColor: `hsl(${index * 360 / pesos.length}, 100%, 50%)`,
+                        fill: false
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Valores de los Pesos'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Características de la Entrada'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function graficarDM(distanciaMedia) {
+            const ctx = document.getElementById('graficoDM').getContext('2d');
+            if (chartDM) {
+                chartDM.destroy();
+            }
+            chartDM = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: distanciaMedia.map((_, index) => index + 1),
+                    datasets: [{
+                        label: 'Distancia Media',
+                        data: distanciaMedia,
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Distancia Media'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Iteraciones'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function calcularGanadora(patron) {
+            let menorDistancia = Infinity;
+            let ganadorIndex = -1;
+            for (let i = 0; i < kohonenWeights.length; i++) {
+                const distancia = calcularDistanciaEuclidiana(patron, kohonenWeights[i]);
+                if (distancia < menorDistancia) {
+                    menorDistancia = distancia;
+                    ganadorIndex = i;
+                }
+            }
+            return ganadorIndex;
+        }
+
+        function calcularDistanciaEuclidiana(v1, v2) {
+            let suma = 0;
+            for (let i = 0; i < v1.length; i++) {
+                suma += Math.pow(v1[i] - v2[i], 2);
+            }
+            return Math.sqrt(suma);
+        }
+    </script>
+</body>
+</html>
